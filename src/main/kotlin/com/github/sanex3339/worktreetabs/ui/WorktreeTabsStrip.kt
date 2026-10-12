@@ -1,27 +1,25 @@
 package com.github.sanex3339.worktreetabs.ui
 
-import com.github.sanex3339.worktreetabs.model.Worktree
+import com.github.sanex3339.worktreetabs.model.WorktreeStatus
 import com.github.sanex3339.worktreetabs.registry.SwitchSupport
+import com.github.sanex3339.worktreetabs.registry.WorktreeIndexHistory
 import com.github.sanex3339.worktreetabs.registry.WorktreeRegistry
+import com.github.sanex3339.worktreetabs.registry.WorktreeStatusService
 import com.github.sanex3339.worktreetabs.registry.WorktreesState
 import com.github.sanex3339.worktreetabs.settings.WorktreeTabsSettings
 import com.github.sanex3339.worktreetabs.switching.WorktreeSwitcher
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.ActionGroup
 import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.text.HtmlBuilder
-import com.intellij.openapi.util.text.HtmlChunk
 import com.intellij.openapi.wm.IdeRootPaneNorthExtension
-import com.intellij.ui.AnimatedIcon
-import com.intellij.ui.awt.RelativePoint
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
-import com.intellij.util.ui.UIUtil
 import com.intellij.util.ui.WrapLayout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,7 +27,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.awt.BorderLayout
-import java.awt.Component
 import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
@@ -40,7 +37,6 @@ import java.awt.event.MouseWheelEvent
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.ScrollPaneConstants
-import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 
 class WorktreeTabsNorthExtension : IdeRootPaneNorthExtension {
@@ -73,20 +69,37 @@ class WorktreeTabsStrip(private val project: Project) : JPanel(BorderLayout()) {
         toolTipText = "All worktrees"
         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
     }
+    private val newButton = JBLabel(AllIcons.General.Add).apply {
+        border = JBUI.Borders.empty(0, 6)
+        toolTipText = "New worktree…"
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+    }
     private var multipleRows: Boolean? = null
     private var updates: Job? = null
 
     init {
         isVisible = false
         border = JBUI.Borders.customLineBottom(JBUI.CurrentTheme.EditorTabs.borderColor())
-        add(chevron, BorderLayout.EAST)
+        // BorderLayout stretches both buttons to the strip's height, so their icons sit centered like the tab labels.
+        add(JPanel(BorderLayout()).apply {
+            isOpaque = false
+            add(newButton, BorderLayout.WEST)
+            add(chevron, BorderLayout.EAST)
+        }, BorderLayout.EAST)
         chevron.addMouseListener(object : MouseAdapter() {
             override fun mouseReleased(e: MouseEvent) {
                 if (e.button == MouseEvent.BUTTON1) WorktreePopup.create(project).showUnderneathOf(chevron)
             }
         })
+        newButton.addMouseListener(object : MouseAdapter() {
+            override fun mouseReleased(e: MouseEvent) {
+                if (e.button != MouseEvent.BUTTON1) return
+                val action = ActionManager.getInstance().getAction(NEW_WORKTREE_ACTION) ?: return
+                ActionUtil.invokeAction(action, newButton, STRIP_POPUP_PLACE, e, null)
+            }
+        })
         tabs.addMouseWheelListener(::scrollSideways)
-        val contextMenu = contextMenuListener()
+        val contextMenu = contextMenuListener(STRIP_POPUP_GROUP)
         addMouseListener(contextMenu)
         tabs.addMouseListener(contextMenu)
     }
@@ -96,9 +109,11 @@ class WorktreeTabsStrip(private val project: Project) : JPanel(BorderLayout()) {
         val registry = WorktreeRegistry.getInstance(project)
         val switcher = WorktreeSwitcher.getInstance(project)
         val settings = WorktreeTabsSettings.getInstance()
+        val statuses = WorktreeStatusService.getInstance(project).statuses
+        val indexHistory = WorktreeIndexHistory.getInstance()
         updates = project.service<WorktreeTabsUiScope>().scope.launch(Dispatchers.EDT) {
-            combine(registry.state, switcher.switchingTo, settings.revision) { state, switching, _ -> state to switching }
-                .collect { (state, switching) -> render(state, switching, settings.multipleRows) }
+            combine(registry.state, switcher.switchingTo, settings.revision, statuses, indexHistory.revision) { state, switching, _, status, _ -> Triple(state, switching, status) }
+                .collect { (state, switching, status) -> render(state, switching, status, settings.multipleRows) }
         }
     }
 
@@ -113,22 +128,28 @@ class WorktreeTabsStrip(private val project: Project) : JPanel(BorderLayout()) {
         g.fillRect(0, 0, width, height)
     }
 
-    private fun render(state: WorktreesState, switching: String?, wrap: Boolean) {
+    private fun render(state: WorktreesState, switching: String?, statuses: Map<String, WorktreeStatus>, wrap: Boolean) {
         isVisible = state.worktrees.isNotEmpty()
         chevron.isVisible = state.worktrees.size > 1
+        val indexHistory = WorktreeIndexHistory.getInstance()
         if (wrap != multipleRows) layOut(wrap)
 
         tabs.removeAll()
         val unsupported = (state.support as? SwitchSupport.Unsupported)?.reason
         var activeTab: WorktreeTab? = null
         for (worktree in state.worktrees) {
+            val active = worktree.path == state.activePath
             val tab = WorktreeTab(
                 worktree = worktree,
-                active = worktree.path == state.activePath,
-                switching = worktree.path == switching,
-                disabledReason = unsupported,
+                state = TabState(
+                    active = active,
+                    switching = worktree.path == switching,
+                    indexed = active || indexHistory.isIndexed(worktree.path),
+                    status = statuses[worktree.path],
+                    disabledReason = unsupported,
+                ),
                 onSelect = { WorktreeSwitcher.getInstance(project).switchTo(worktree.path) },
-                contextMenu = contextMenuListener(),
+                contextMenu = contextMenuListener(TAB_POPUP_GROUP),
             )
             if (worktree.path == (switching ?: state.activePath)) activeTab = tab
             tabs.add(tab)
@@ -160,15 +181,18 @@ class WorktreeTabsStrip(private val project: Project) : JPanel(BorderLayout()) {
         e.consume()
     }
 
-    private fun contextMenuListener() = object : MouseAdapter() {
+    private fun contextMenuListener(groupId: String) = object : MouseAdapter() {
         override fun mousePressed(e: MouseEvent) = showIfTrigger(e)
 
         override fun mouseReleased(e: MouseEvent) = showIfTrigger(e)
 
         private fun showIfTrigger(e: MouseEvent) {
             if (!e.isPopupTrigger) return
-            val group = ActionManager.getInstance().getAction(STRIP_POPUP_GROUP) as? ActionGroup ?: return
-            ActionManager.getInstance().createActionPopupMenu(STRIP_POPUP_PLACE, group).component.show(e.component, e.x, e.y)
+            val group = ActionManager.getInstance().getAction(groupId) as? ActionGroup ?: return
+            val menu = ActionManager.getInstance().createActionPopupMenu(STRIP_POPUP_PLACE, group)
+            // The tab under the mouse provides its worktree to the menu's actions.
+            (e.component as? JComponent)?.let(menu::setTargetComponent)
+            menu.component.show(e.component, e.x, e.y)
             e.consume()
         }
     }
@@ -176,82 +200,8 @@ class WorktreeTabsStrip(private val project: Project) : JPanel(BorderLayout()) {
     private companion object {
         const val WHEEL_STEP = 40
         const val STRIP_POPUP_GROUP = "WorktreeTabs.StripPopup"
+        const val TAB_POPUP_GROUP = "WorktreeTabs.TabPopup"
+        const val NEW_WORKTREE_ACTION = "WorktreeTabs.New"
         const val STRIP_POPUP_PLACE = "WorktreeTabsStrip"
-    }
-}
-
-private class WorktreeTab(
-    private val worktree: Worktree,
-    private val active: Boolean,
-    switching: Boolean,
-    private val disabledReason: String?,
-    onSelect: () -> Unit,
-    contextMenu: MouseAdapter,
-) : JPanel(BorderLayout()) {
-    private var hovered = false
-    private val selectable = !active && disabledReason == null
-
-    init {
-        isOpaque = false
-        border = JBUI.Borders.empty(0, 12)
-        add(
-            JBLabel(worktree.label, if (switching) AnimatedIcon.Default.INSTANCE else null, SwingConstants.LEADING).apply {
-                font = JBUI.CurrentTheme.EditorTabs.font()
-                foreground = when {
-                    active -> JBUI.CurrentTheme.EditorTabs.underlinedTabForeground()
-                    disabledReason != null -> UIUtil.getLabelDisabledForeground()
-                    else -> UIUtil.getLabelForeground()
-                }
-            },
-        )
-        toolTipText = tooltip()
-        if (selectable) cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-        addMouseListener(contextMenu)
-        addMouseListener(object : MouseAdapter() {
-            override fun mouseEntered(e: MouseEvent) {
-                hovered = true
-                repaint()
-            }
-
-            override fun mouseExited(e: MouseEvent) {
-                hovered = false
-                repaint()
-            }
-
-            override fun mouseReleased(e: MouseEvent) {
-                if (selectable && e.button == MouseEvent.BUTTON1 && !e.isPopupTrigger && contains(e.point)) onSelect()
-            }
-        })
-    }
-
-    override fun getPreferredSize(): Dimension = Dimension(super.getPreferredSize().width, JBUI.scale(TAB_HEIGHT))
-
-    override fun paintComponent(g: Graphics) {
-        val background = when {
-            active -> JBUI.CurrentTheme.EditorTabs.underlinedTabBackground()
-            hovered && selectable -> JBUI.CurrentTheme.EditorTabs.hoverBackground()
-            else -> null
-        }
-        if (background != null) {
-            g.color = background
-            g.fillRect(0, 0, width, height)
-        }
-        if (active) {
-            val thickness = JBUI.CurrentTheme.EditorTabs.underlineHeight()
-            g.color = JBUI.CurrentTheme.EditorTabs.underlineColor()
-            g.fillRect(0, height - thickness, width, thickness)
-        }
-    }
-
-    private fun tooltip(): String {
-        val html = HtmlBuilder().append(HtmlChunk.text(worktree.label).bold()).br().append(worktree.path)
-        if (worktree.isMain) html.br().append("Main checkout")
-        if (worktree.isLocked) html.br().append("Locked" + (worktree.lockReason?.let { ": $it" } ?: ""))
-        disabledReason?.let { html.br().append(HtmlChunk.text("Switching unavailable: $it").italic()) }
-        return html.wrapWithHtmlBody().toString()
-    }
-
-    private companion object {
-        const val TAB_HEIGHT = 28
     }
 }

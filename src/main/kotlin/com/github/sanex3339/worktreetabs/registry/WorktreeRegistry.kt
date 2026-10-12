@@ -68,8 +68,11 @@ class WorktreeRegistry(private val project: Project, scope: CoroutineScope) {
      * the project is being disposed, which leaves a half-built repository behind; from here on the registry is idle.
      */
     @Volatile
-    var isClosing: Boolean = false
-        private set
+    private var closingNoticed: Boolean = false
+
+    /** True from the moment the project starts closing (or is no longer open); the plugin then leaves Git alone. */
+    val isClosing: Boolean
+        get() = closingNoticed || project.isDisposed || !project.isOpen || ApplicationManager.getApplication().isDisposed
 
     init {
         @OptIn(FlowPreview::class)
@@ -88,7 +91,11 @@ class WorktreeRegistry(private val project: Project, scope: CoroutineScope) {
         })
         appConnection.subscribe(ProjectCloseListener.TOPIC, object : ProjectCloseListener {
             override fun projectClosingBeforeSave(project: Project) {
-                if (project == this@WorktreeRegistry.project) isClosing = true
+                if (project == this@WorktreeRegistry.project) closingNoticed = true
+            }
+
+            override fun projectClosing(project: Project) {
+                if (project == this@WorktreeRegistry.project) closingNoticed = true
             }
         })
         refresh()
@@ -100,7 +107,7 @@ class WorktreeRegistry(private val project: Project, scope: CoroutineScope) {
     }
 
     private suspend fun load(): WorktreesState {
-        if (isClosing || project.isDisposed) return state.value
+        if (isClosing) return state.value
         val repositories = GitRepositoryManager.getInstance(project).repositories
         val repository = repositories.firstOrNull() ?: return WorktreesState(support = SwitchSupport.Unsupported("The project has no Git repository"))
         val listed = WorktreeGit.list(project, repository.root) ?: return state.value

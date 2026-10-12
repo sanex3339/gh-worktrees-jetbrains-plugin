@@ -1,6 +1,9 @@
 package com.github.sanex3339.worktreetabs.e2e
 
+import com.github.sanex3339.worktreetabs.commands.WorktreeCommands
 import com.github.sanex3339.worktreetabs.registry.SwitchSupport
+import com.github.sanex3339.worktreetabs.registry.WorktreeIndexHistory
+import com.github.sanex3339.worktreetabs.registry.WorktreeStatusService
 import com.github.sanex3339.worktreetabs.registry.WorktreeRegistry
 import com.github.sanex3339.worktreetabs.switching.WorktreeStateStore
 import com.github.sanex3339.worktreetabs.switching.WorktreeSwitcher
@@ -90,6 +93,7 @@ class Scenario(private val project: Project, private val main: String, private v
             verifySecondVisit()
             phase = "cleanup"
             switchTo(main)
+            manageWorktrees()
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             LOG.warn("E2E scenario crashed", e)
@@ -204,6 +208,50 @@ class Scenario(private val project: Project, private val main: String, private v
         val (open, _) = openEditors()
         check("the worktree's own tabs restored", open == listOf("$worktree/README.md"), open.joinToString())
         check("the worktree's own bookmark restored", bookmarkUrls() == listOf(url("$worktree/wtspike/use.ts")), bookmarkUrls().joinToString())
+    }
+
+    /** Milestone 3: create a worktree and switch to it, lock and unlock it, read statuses, remove it while active. */
+    private suspend fun manageWorktrees() {
+        val registry = WorktreeRegistry.getInstance(project)
+        val commands = WorktreeCommands.getInstance(project)
+        val created = Path.of(main).resolveSibling("e2e-new").toString()
+        val branch = "e2e-new-${System.currentTimeMillis()}"
+        withContext(Dispatchers.IO) { ProcessBuilder("git", "-C", main, "worktree", "remove", "--force", created).start().waitFor() }
+        registry.refresh()
+
+        phase = "new worktree"
+        check("not indexed before its first switch", !WorktreeIndexHistory.getInstance().isIndexed(created), "")
+        commands.create(WorktreeCommands.NewWorktreeRequest(created, branch, newBranch = true, base = null, switchToIt = true))
+        val start = System.currentTimeMillis()
+        val switched = waitUntil(10 * 60_000) { registry.state.value.activePath == created && WorktreeSwitcher.getInstance(project).switchingTo.value == null }
+        timings += "new worktree: created and switched in ${System.currentTimeMillis() - start} ms"
+        check("created and switched to", switched, "${registry.state.value.activePath}")
+        check("on its new branch", GitRepositoryManager.getInstance(project).repositories.singleOrNull()?.currentBranchName == branch, "${GitRepositoryManager.getInstance(project).repositories.map { it.currentBranchName }}")
+        val indexed = waitUntil(5 * 60_000) { WorktreeIndexHistory.getInstance().isIndexed(created) }
+        timings += "new worktree: marked indexed ${System.currentTimeMillis() - start} ms after the request"
+        check("marked indexed once indexing settled", indexed, "")
+
+        phase = "lock"
+        val worktree = registry.state.value.worktrees.first { it.path == created }
+        commands.lock(worktree, "e2e reason")
+        check("locked with its reason", waitUntil(10_000) { registry.state.value.worktrees.any { it.path == created && it.isLocked && it.lockReason == "e2e reason" } }, "")
+        commands.unlock(worktree)
+        check("unlocked", waitUntil(10_000) { registry.state.value.worktrees.any { it.path == created && !it.isLocked } }, "")
+
+        phase = "status"
+        val statuses = WorktreeStatusService.getInstance(project)
+        statuses.refresh()
+        check("main's uncommitted files counted", waitUntil(15_000) { (statuses.statuses.value[main]?.changes ?: 0) > 0 }, "${statuses.statuses.value[main]}")
+        check("every worktree has a status", waitUntil(15_000) { registry.state.value.worktrees.all { it.path in statuses.statuses.value } }, "${statuses.statuses.value.keys.size} of ${registry.state.value.worktrees.size}")
+
+        phase = "remove"
+        commands.remove(registry.state.value.worktrees.first { it.path == created }, force = true)
+        val removed = waitUntil(3 * 60_000) { registry.state.value.worktrees.none { it.path == created } }
+        check("removed while active: switched to main first", registry.state.value.activePath == main, "${registry.state.value.activePath}")
+        check("gone from the list and from disk", removed && !Files.exists(Path.of(created)), "listed=${!removed} exists=${Files.exists(Path.of(created))}")
+        check("its snapshots forgotten", WorktreeStateStore.getInstance(project).get(created, "editors") == null, "")
+        check("its index history forgotten", !WorktreeIndexHistory.getInstance().isIndexed(created), "")
+        withContext(Dispatchers.IO) { ProcessBuilder("git", "-C", main, "branch", "-D", branch).start().waitFor() }
     }
 
     private suspend fun verifyCore(expected: String) {

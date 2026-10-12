@@ -31,8 +31,14 @@ import java.nio.file.Path
 private val LOG = logger<CoreSwap>()
 
 /**
- * The swap the spike measured: refresh the target, move the module's content root, re-map Git, then move the project
- * root entity once nothing else references the old root. All-or-nothing: if re-mapping fails the content root goes back.
+ * The swap the spike measured: refresh the target, re-map Git, move the module's content root, then move the project
+ * root entity once nothing else references the old root. All-or-nothing: if moving the content root fails, Git is
+ * mapped back.
+ *
+ * Git goes first, and the next step waits until git4idea has built the new repository: git4idea registers a repository
+ * for disposal before its constructor finishes and lets the constructor be cancelled, so firing the root and mapping
+ * changes back to back could cancel a repository mid-construction and leave a half-built one that fails when the
+ * project closes.
  */
 internal object CoreSwap {
     suspend fun swap(project: Project, from: String, to: String, worktreePaths: List<String>) {
@@ -43,12 +49,14 @@ internal object CoreSwap {
             root
         }
 
-        moveContentRoot(module, from, to, worktreePaths)
+        val source = LocalFileSystem.getInstance().findFileByPath(from)
+        remapVcs(project, from, target)
+        waitForRepository(project, target)
         try {
-            remapVcs(project, from, target)
+            moveContentRoot(module, from, to, worktreePaths)
         } catch (e: Throwable) {
-            LOG.warn("Re-mapping Git to $to failed; moving the content root back to $from", e)
-            runCatching { moveContentRoot(module, to, from, worktreePaths) }.onFailure { LOG.warn("Rolling the content root back failed", it) }
+            LOG.warn("Moving the content root to $to failed; mapping Git back to $from", e)
+            if (source != null) runCatching { remapVcs(project, to, source) }.onFailure { LOG.warn("Mapping Git back failed", it) }
             throw e
         }
 
@@ -58,8 +66,6 @@ internal object CoreSwap {
         val deadline = System.currentTimeMillis() + RELEASE_TIMEOUT_MS
         while (PlatformInternals.isReferencedByOtherEntities(project, fromUrl) && System.currentTimeMillis() < deadline) delay(25)
         PlatformInternals.moveProjectRoot(project, fromUrl, Path.of(to))
-
-        waitForRepository(project, target)
     }
 
     /** Puts the content root at [to], with [from]'s exclusions and source folders moved along and nested worktrees excluded. */

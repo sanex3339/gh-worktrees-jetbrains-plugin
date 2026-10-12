@@ -2,6 +2,7 @@ package com.github.sanex3339.worktreetabs.switching
 
 import com.github.sanex3339.worktreetabs.model.Worktree
 import com.github.sanex3339.worktreetabs.registry.SwitchSupport
+import com.github.sanex3339.worktreetabs.registry.WorktreeIndexHistory
 import com.github.sanex3339.worktreetabs.registry.WorktreeRegistry
 import com.github.sanex3339.worktreetabs.registry.WorktreesState
 import com.github.sanex3339.worktreetabs.ui.WorktreeNotifications
@@ -13,6 +14,7 @@ import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.module.ModuleManager
+import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.platform.ide.progress.withBackgroundProgress
 import kotlinx.coroutines.CancellationException
@@ -22,6 +24,10 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jdom.Element
@@ -49,6 +55,27 @@ class WorktreeSwitcher(private val project: Project, scope: CoroutineScope) {
         scope.launch {
             WorktreeRegistry.getInstance(project).state.collect { keepNestedWorktreesExcluded(it) }
         }
+        scope.launch {
+            WorktreeRegistry.getInstance(project).state.map { it.activePath }.distinctUntilChanged().collectLatest { active ->
+                if (active != null && awaitIndexed()) WorktreeIndexHistory.getInstance().markIndexed(active)
+            }
+        }
+    }
+
+    /**
+     * True once the project has been smart for a few seconds in a row: indexing of a just-activated worktree starts a
+     * moment after the switch, so a single smart check could come too early.
+     */
+    private suspend fun awaitIndexed(): Boolean {
+        val dumb = DumbService.getInstance(project)
+        var smartSince: Long? = null
+        while (!project.isDisposed) {
+            val now = System.currentTimeMillis()
+            if (dumb.isDumb) smartSince = null else if (smartSince == null) smartSince = now
+            if (smartSince != null && now - smartSince >= INDEXED_QUIET_MS) return true
+            delay(250)
+        }
+        return false
     }
 
     fun switchTo(path: String) {
@@ -144,6 +171,8 @@ class WorktreeSwitcher(private val project: Project, scope: CoroutineScope) {
     }
 
     companion object {
+        private const val INDEXED_QUIET_MS = 5_000L
+
         fun getInstance(project: Project): WorktreeSwitcher = project.service()
     }
 }

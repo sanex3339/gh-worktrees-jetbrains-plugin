@@ -1,16 +1,13 @@
 package com.github.sanex3339.worktreetabs.e2e
 
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.EDT
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.nio.file.Path
 
 private val LOG = logger<E2EStartup>()
@@ -31,7 +28,8 @@ class E2EService(private val project: Project, private val scope: CoroutineScope
             try {
                 Scenario(project, project.basePath!!, worktree).run(report)
             } finally {
-                if (exit) withContext(Dispatchers.EDT) { ApplicationManager.getApplication().exit(true, true, false) }
+                // Quit from a fresh EDT event, not from inside this project-scoped coroutine the shutdown would cancel.
+                if (exit) ApplicationManager.getApplication().invokeLater { ApplicationManager.getApplication().exit(false, true, false) }
             }
         }
     }

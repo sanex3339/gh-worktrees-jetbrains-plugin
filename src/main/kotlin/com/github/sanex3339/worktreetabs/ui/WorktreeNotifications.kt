@@ -5,6 +5,8 @@ import com.intellij.notification.NotificationType
 import com.intellij.openapi.project.Project
 
 object WorktreeNotifications {
+    fun info(project: Project, text: String) = notify(project, text, NotificationType.INFORMATION)
+
     fun warn(project: Project, text: String) = notify(project, text, NotificationType.WARNING)
 
     fun error(project: Project, text: String) = notify(project, text, NotificationType.ERROR)

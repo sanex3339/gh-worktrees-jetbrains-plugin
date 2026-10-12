@@ -42,9 +42,30 @@
         <action id="WorktreeTabs.MultipleRows" class="com.github.sanex3339.worktreetabs.actions.ToggleMultipleRowsAction"
                 text="Show Worktree Tabs in Multiple Rows"
                 description="Wrap the worktree tabs into several rows instead of one scrollable row"/>
+        <action id="WorktreeTabs.New" class="com.github.sanex3339.worktreetabs.actions.NewWorktreeAction"
+                text="New Worktree…" description="Create a git worktree and switch to it" icon="AllIcons.General.Add"/>
+        <action id="WorktreeTabs.SwitchTo" class="com.github.sanex3339.worktreetabs.actions.SwitchToWorktreeAction"
+                text="Switch to This Worktree"/>
+        <action id="WorktreeTabs.Lock" class="com.github.sanex3339.worktreetabs.actions.LockWorktreeAction"
+                text="Lock…" description="Keep the worktree from being pruned, moved or removed (git worktree lock)"/>
+        <action id="WorktreeTabs.Unlock" class="com.github.sanex3339.worktreetabs.actions.UnlockWorktreeAction"
+                text="Unlock" description="Allow pruning, moving and removing the worktree again (git worktree unlock)"/>
+        <action id="WorktreeTabs.Remove" class="com.github.sanex3339.worktreetabs.actions.RemoveWorktreeAction"
+                text="Remove Worktree…" description="Delete the worktree's folder (git worktree remove); its branch stays"/>
         <group id="WorktreeTabs.StripPopup">
+            <reference ref="WorktreeTabs.New"/>
             <reference ref="WorktreeTabs.Switch"/>
             <separator/>
+            <reference ref="WorktreeTabs.MultipleRows"/>
+        </group>
+        <group id="WorktreeTabs.TabPopup">
+            <reference ref="WorktreeTabs.SwitchTo"/>
+            <separator/>
+            <reference ref="WorktreeTabs.Lock"/>
+            <reference ref="WorktreeTabs.Unlock"/>
+            <reference ref="WorktreeTabs.Remove"/>
+            <separator/>
+            <reference ref="WorktreeTabs.New"/>
             <reference ref="WorktreeTabs.MultipleRows"/>
         </group>
     </actions>

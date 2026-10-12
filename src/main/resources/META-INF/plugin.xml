@@ -1,0 +1,27 @@
+<idea-plugin>
+    <!-- The id is permanent once published to JetBrains Marketplace. -->
+    <id>com.github.sanex3339.worktreetabs</id>
+    <name>Worktree Tabs</name>
+    <vendor email="sanex3339@gmail.com" url="https://github.com/sanex3339">sanex3339</vendor>
+    <description><![CDATA[
+    <p>A tab for every <b>git worktree</b> of your project, and one click switches the whole IDE to it,
+    <b>in the same window</b>: code, project tree, search and Git follow, without reopening the project.
+    Terminals and processes that are already running keep running.</p>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>Git4Idea</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <ideRootPaneNorth implementation="com.github.sanex3339.worktreetabs.ui.WorktreeTabsNorthExtension"/>
+        <postStartupActivity implementation="com.github.sanex3339.worktreetabs.WorktreeTabsStartup"/>
+        <notificationGroup id="Worktree Tabs" displayType="BALLOON"/>
+    </extensions>
+
+    <actions>
+        <action id="WorktreeTabs.Switch" class="com.github.sanex3339.worktreetabs.actions.SwitchWorktreeAction"
+                text="Switch Worktree…" description="Switch the project to another worktree of its repository">
+            <add-to-group group-id="Git.MainMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>

@@ -1,0 +1,15 @@
+<idea-plugin>
+    <id>com.github.sanex3339.worktreetabs.e2e</id>
+    <name>Worktree Tabs E2E Harness</name>
+    <vendor>sanex3339</vendor>
+    <description><![CDATA[Dev-only: drives Worktree Tabs switches in a sandbox IDE and writes a pass/fail report.]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.github.sanex3339.worktreetabs</depends>
+    <depends>Git4Idea</depends>
+    <depends>org.jetbrains.plugins.terminal</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <postStartupActivity implementation="com.github.sanex3339.worktreetabs.e2e.E2EStartup"/>
+    </extensions>
+</idea-plugin>

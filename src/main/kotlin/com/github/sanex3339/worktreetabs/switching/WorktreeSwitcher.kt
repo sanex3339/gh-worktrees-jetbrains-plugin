@@ -63,7 +63,7 @@ class WorktreeSwitcher(private val project: Project, scope: CoroutineScope) {
         val worktree = state.worktrees.firstOrNull { it.path == target }
         try {
             when {
-                project.isDisposed || from == null || worktree == null || target == from -> return
+                project.isDisposed || registry.isClosing || from == null || worktree == null || target == from -> return
                 state.support is SwitchSupport.Unsupported -> WorktreeNotifications.warn(project, "Can't switch worktrees: ${state.support.reason}")
                 !Files.isDirectory(Path.of(target)) -> WorktreeNotifications.warn(project, "The worktree folder $target no longer exists")
                 else -> withBackgroundProgress(project, "Switching to ${worktree.label}…") {
@@ -104,7 +104,7 @@ class WorktreeSwitcher(private val project: Project, scope: CoroutineScope) {
             }
         }
 
-        if (project.isDisposed) return
+        if (project.isDisposed || WorktreeRegistry.getInstance(project).isClosing) return
         timed(timings, "swap") { CoreSwap.swap(project, context.from, context.to, context.worktreePaths) }
 
         for (step in steps) {
@@ -138,7 +138,7 @@ class WorktreeSwitcher(private val project: Project, scope: CoroutineScope) {
     /** Worktrees inside the active one (e.g. `.claude/worktrees/`) would be indexed twice; keep them excluded. */
     private suspend fun keepNestedWorktreesExcluded(state: WorktreesState) {
         val active = state.activePath ?: return
-        if (state.support !is SwitchSupport.Supported || switchingTo.value != null || project.isDisposed) return
+        if (state.support !is SwitchSupport.Supported || switchingTo.value != null || project.isDisposed || WorktreeRegistry.getInstance(project).isClosing) return
         val module = readAction { ModuleManager.getInstance(project).modules.singleOrNull() } ?: return
         CoreSwap.excludeNestedWorktrees(module, active, state.worktrees.map { it.path })
     }

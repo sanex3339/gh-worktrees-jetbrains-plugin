@@ -14,6 +14,7 @@ import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectCloseListener
 import com.intellij.openapi.roots.ModuleRootEvent
 import com.intellij.openapi.roots.ModuleRootListener
 import com.intellij.openapi.roots.ModuleRootManager
@@ -62,6 +63,14 @@ class WorktreeRegistry(private val project: Project, scope: CoroutineScope) {
 
     private val requests = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
+    /**
+     * Set once the project starts closing. Asking git4idea for its repositories then can make it create one while
+     * the project is being disposed, which leaves a half-built repository behind; from here on the registry is idle.
+     */
+    @Volatile
+    var isClosing: Boolean = false
+        private set
+
     init {
         @OptIn(FlowPreview::class)
         scope.launch(Dispatchers.IO) {
@@ -73,8 +82,14 @@ class WorktreeRegistry(private val project: Project, scope: CoroutineScope) {
         connection.subscribe(ModuleRootListener.TOPIC, object : ModuleRootListener {
             override fun rootsChanged(event: ModuleRootEvent) = refresh()
         })
-        ApplicationManager.getApplication().messageBus.connect(scope).subscribe(ApplicationActivationListener.TOPIC, object : ApplicationActivationListener {
+        val appConnection = ApplicationManager.getApplication().messageBus.connect(scope)
+        appConnection.subscribe(ApplicationActivationListener.TOPIC, object : ApplicationActivationListener {
             override fun applicationActivated(ideFrame: IdeFrame) = refresh()
+        })
+        appConnection.subscribe(ProjectCloseListener.TOPIC, object : ProjectCloseListener {
+            override fun projectClosingBeforeSave(project: Project) {
+                if (project == this@WorktreeRegistry.project) isClosing = true
+            }
         })
         refresh()
     }
@@ -85,6 +100,7 @@ class WorktreeRegistry(private val project: Project, scope: CoroutineScope) {
     }
 
     private suspend fun load(): WorktreesState {
+        if (isClosing || project.isDisposed) return state.value
         val repositories = GitRepositoryManager.getInstance(project).repositories
         val repository = repositories.firstOrNull() ?: return WorktreesState(support = SwitchSupport.Unsupported("The project has no Git repository"))
         val listed = WorktreeGit.list(project, repository.root) ?: return state.value

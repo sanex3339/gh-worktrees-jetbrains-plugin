@@ -38,7 +38,7 @@ switch.
 
 | Unit | Responsibility | Built on |
 |---|---|---|
-| `WorktreeRegistry` (project service) | Worktrees of the repository and the active one, as a `StateFlow` the UI observes. Refreshes on Git repository changes, on worktree list reloads and when the IDE frame gains focus. | git4idea `GitRepository.getWorkingTreeHolder()` (`git4idea.GitWorkingTree`) |
+| `WorktreeRegistry` (project service) | Worktrees of the repository and the active one, as a `StateFlow` the UI observes. Refreshes on Git repository changes, VCS mapping and root changes and when the IDE frame gains focus; idle once the project starts closing (asking git4idea for repositories then leaves a half-built repository behind). | `git worktree list --porcelain` through git4idea's command API (its worktree holder has no public change event) |
 | `WorktreeStatusService` | Badges per worktree: branch (or short hash when detached), uncommitted changes, commits ahead/behind upstream, not indexed yet. Inactive worktrees: `git status --porcelain=v2 --branch` in the background; the active one from `ChangeListManager`. | `GitCommand.STATUS` via git4idea handlers |
 | `WorktreeSwitcher` (project service) | Runs a switch as an ordered list of steps, one at a time; a click during a switch replaces the queued target. Reports progress and failures. | the steps below |
 | Core steps | Save documents, refresh the target, swap the content root, move the Git mapping, move the project root once the old root is released. | spike |
@@ -97,8 +97,10 @@ its tab; if it was active the plugin switches to the main checkout first. Runnin
   short hash when detached. The active tab is selected. Badges: a dot for uncommitted changes, `↑n ↓m` against
   upstream, a lock icon, and a dimmed label for never-indexed worktrees. Tooltip: path, branch, status, and for
   never-indexed worktrees a note that the first switch indexes it. Prunable worktrees (folder missing) are not shown.
-- **Behavior**: click switches; the target tab shows a spinner until the switch completes. Tabs shrink with ellipsis
-  when space runs out, then overflow into a `»` dropdown.
+- **Behavior**: click switches; the target tab shows a spinner until the switch completes.
+- **Many worktrees**: by default one row that scrolls sideways (mouse wheel or trackpad, no visible scrollbar; the
+  active tab is kept in view); with Show Worktree Tabs in Multiple Rows (strip context menu) the tabs wrap into as
+  many rows as needed. A chevron at the end of the strip lists every worktree with type-to-filter.
 - **"+"**: New Worktree dialog: new branch name (or an existing local branch), base (current HEAD by default),
   location (default: a sibling folder `<repo>.worktrees/<branch>`), "Switch to it" (on). Runs `git worktree add`, then
   switches.

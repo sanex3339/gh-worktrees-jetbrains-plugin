@@ -1,0 +1,26 @@
+<idea-plugin>
+    <id>dev.sanex.wtspike</id>
+    <name>Worktree Swap Spike</name>
+    <vendor>sanex3339</vendor>
+    <description><![CDATA[
+    Throwaway experiment: swaps the project's content root and VCS mapping between git worktrees in place
+    and records what the IDE re-scans, re-indexes and how long it takes to settle.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>Git4Idea</depends>
+    <depends>JavaScript</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <postStartupActivity implementation="dev.sanex.wtspike.SpikeStartup"/>
+        <projectIndexingActivityHistoryListener implementation="dev.sanex.wtspike.IndexingRecorderListener"/>
+        <notificationGroup id="Worktree Spike" displayType="BALLOON"/>
+    </extensions>
+
+    <actions>
+        <action id="WtSpike.Run" class="dev.sanex.wtspike.RunExperimentAction"
+                text="Worktree Spike: Run Experiment"/>
+        <action id="WtSpike.Swap" class="dev.sanex.wtspike.SwapToWorktreeAction"
+                text="Worktree Spike: Swap to Worktree…"/>
+    </actions>
+</idea-plugin>

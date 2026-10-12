@@ -35,6 +35,9 @@ dependencies {
             local(ideLocalPath)
         }
         bundledPlugin("Git4Idea")
+        // Optional integrations (see the optional <depends> in plugin.xml).
+        bundledPlugin("JavaScript")
+        bundledPlugin("org.jetbrains.plugins.terminal")
         // Split platform modules Git4Idea's API exposes (GitRepository's supertypes).
         bundledModule("intellij.platform.vcs.dvcs")
         bundledModule("intellij.platform.vcs.dvcs.impl")

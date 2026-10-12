@@ -1,5 +1,6 @@
 package com.github.sanex3339.worktreetabs.switching
 
+import com.github.sanex3339.worktreetabs.model.Worktree
 import com.github.sanex3339.worktreetabs.registry.SwitchSupport
 import com.github.sanex3339.worktreetabs.registry.WorktreeRegistry
 import com.github.sanex3339.worktreetabs.registry.WorktreesState
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jdom.Element
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -61,25 +63,12 @@ class WorktreeSwitcher(private val project: Project, scope: CoroutineScope) {
         val worktree = state.worktrees.firstOrNull { it.path == target }
         try {
             when {
-                from == null || worktree == null || target == from -> return
-                state.support is SwitchSupport.Unsupported -> {
-                    WorktreeNotifications.warn(project, "Can't switch worktrees: ${state.support.reason}")
-                    return
+                project.isDisposed || from == null || worktree == null || target == from -> return
+                state.support is SwitchSupport.Unsupported -> WorktreeNotifications.warn(project, "Can't switch worktrees: ${state.support.reason}")
+                !Files.isDirectory(Path.of(target)) -> WorktreeNotifications.warn(project, "The worktree folder $target no longer exists")
+                else -> withBackgroundProgress(project, "Switching to ${worktree.label}…") {
+                    run(SwitchContext(project, from, target, state.worktrees.map { it.path }), worktree)
                 }
-                !Files.isDirectory(Path.of(target)) -> {
-                    WorktreeNotifications.warn(project, "The worktree folder $target no longer exists")
-                    return
-                }
-            }
-            withBackgroundProgress(project, "Switching to ${worktree!!.label}…") {
-                val editors = withContext(Dispatchers.EDT) {
-                    val captured = EditorCarryOver.capture(project, from!!)
-                    FileDocumentManager.getInstance().saveAllDocuments()
-                    FileEditorManagerEx.getInstanceEx(project).closeAllFiles()
-                    captured
-                }
-                CoreSwap.swap(project, from!!, target, state.worktrees.map { it.path })
-                withContext(Dispatchers.EDT) { EditorCarryOver.restore(project, target, editors) }
             }
         } catch (e: CancellationException) {
             throw e
@@ -92,10 +81,64 @@ class WorktreeSwitcher(private val project: Project, scope: CoroutineScope) {
         }
     }
 
+    private suspend fun run(context: SwitchContext, worktree: Worktree) {
+        val started = System.currentTimeMillis()
+        val timings = mutableListOf<String>()
+        val failed = mutableListOf<String>()
+        val steps = SwitchStep.EP_NAME.extensionList.sortedBy { it.order }
+        val store = WorktreeStateStore.getInstance(project)
+
+        val carried = mutableMapOf<SwitchStep, Element>()
+        for (step in steps) {
+            timed(timings, "capture ${step.title}") {
+                runStep(step, failed) { step.capture(context) }?.let { snapshot ->
+                    carried[step] = snapshot
+                    step.snapshotKey?.let { store.put(context.from, it, snapshot) }
+                }
+            }
+        }
+        timed(timings, "save and close editors") {
+            withContext(Dispatchers.EDT) {
+                FileDocumentManager.getInstance().saveAllDocuments()
+                FileEditorManagerEx.getInstanceEx(project).closeAllFiles()
+            }
+        }
+
+        if (project.isDisposed) return
+        timed(timings, "swap") { CoreSwap.swap(project, context.from, context.to, context.worktreePaths) }
+
+        for (step in steps) {
+            val saved = step.snapshotKey?.let { store.get(context.to, it) }
+            timed(timings, "restore ${step.title}") { runStep(step, failed) { step.restore(context, saved, carried[step]) } }
+        }
+
+        LOG.info("Switched ${context.from} -> ${context.to} in ${System.currentTimeMillis() - started} ms (${timings.joinToString()})")
+        if (failed.isNotEmpty()) WorktreeNotifications.warn(project, "Switched to ${worktree.label}, but couldn't move: ${failed.distinct().joinToString()}")
+    }
+
+    private suspend fun <T> runStep(step: SwitchStep, failed: MutableList<String>, block: suspend () -> T): T? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        LOG.warn("Worktree switch step '${step.title}' failed", e)
+        failed += step.title
+        null
+    }
+
+    private suspend fun <T> timed(timings: MutableList<String>, label: String, block: suspend () -> T): T {
+        val start = System.currentTimeMillis()
+        try {
+            return block()
+        } finally {
+            timings += "$label ${System.currentTimeMillis() - start} ms"
+        }
+    }
+
     /** Worktrees inside the active one (e.g. `.claude/worktrees/`) would be indexed twice; keep them excluded. */
     private suspend fun keepNestedWorktreesExcluded(state: WorktreesState) {
         val active = state.activePath ?: return
-        if (state.support !is SwitchSupport.Supported || switchingTo.value != null) return
+        if (state.support !is SwitchSupport.Supported || switchingTo.value != null || project.isDisposed) return
         val module = readAction { ModuleManager.getInstance(project).modules.singleOrNull() } ?: return
         CoreSwap.excludeNestedWorktrees(module, active, state.worktrees.map { it.path })
     }

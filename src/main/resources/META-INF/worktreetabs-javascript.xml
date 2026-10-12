@@ -1,0 +1,6 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.github.sanex3339.worktreetabs">
+        <switchStep implementation="com.github.sanex3339.worktreetabs.javascript.TypeScriptRestartStep"/>
+        <switchStep implementation="com.github.sanex3339.worktreetabs.javascript.NpmScriptsStep"/>
+    </extensions>
+</idea-plugin>

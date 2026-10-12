@@ -6,11 +6,20 @@
     <description><![CDATA[
     <p>A tab for every <b>git worktree</b> of your project, and one click switches the whole IDE to it,
     <b>in the same window</b>: code, project tree, search and Git follow, without reopening the project.
-    Terminals and processes that are already running keep running.</p>
+    Each worktree keeps its own editor tabs, bookmarks, breakpoints and changelists; run configurations and new
+    terminals follow the switch. Terminals and processes that are already running keep running.</p>
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>Git4Idea</depends>
+    <depends optional="true" config-file="worktreetabs-javascript.xml">JavaScript</depends>
+    <depends optional="true" config-file="worktreetabs-terminal.xml">org.jetbrains.plugins.terminal</depends>
+    <depends optional="true" config-file="worktreetabs-xdebugger.xml">com.intellij.modules.xdebugger</depends>
+
+    <extensionPoints>
+        <extensionPoint qualifiedName="com.github.sanex3339.worktreetabs.switchStep"
+                        interface="com.github.sanex3339.worktreetabs.switching.SwitchStep" dynamic="true"/>
+    </extensionPoints>
 
     <extensions defaultExtensionNs="com.intellij">
         <ideRootPaneNorth implementation="com.github.sanex3339.worktreetabs.ui.WorktreeTabsNorthExtension"/>
@@ -18,10 +27,25 @@
         <notificationGroup id="Worktree Tabs" displayType="BALLOON"/>
     </extensions>
 
+    <extensions defaultExtensionNs="com.github.sanex3339.worktreetabs">
+        <switchStep implementation="com.github.sanex3339.worktreetabs.switching.steps.EditorsStep"/>
+        <switchStep implementation="com.github.sanex3339.worktreetabs.switching.steps.BookmarksStep"/>
+        <switchStep implementation="com.github.sanex3339.worktreetabs.switching.steps.ChangelistsStep"/>
+        <switchStep implementation="com.github.sanex3339.worktreetabs.switching.steps.RunConfigurationsStep"/>
+    </extensions>
+
     <actions>
         <action id="WorktreeTabs.Switch" class="com.github.sanex3339.worktreetabs.actions.SwitchWorktreeAction"
                 text="Switch Worktree…" description="Switch the project to another worktree of its repository">
             <add-to-group group-id="Git.MainMenu" anchor="last"/>
         </action>
+        <action id="WorktreeTabs.MultipleRows" class="com.github.sanex3339.worktreetabs.actions.ToggleMultipleRowsAction"
+                text="Show Worktree Tabs in Multiple Rows"
+                description="Wrap the worktree tabs into several rows instead of one scrollable row"/>
+        <group id="WorktreeTabs.StripPopup">
+            <reference ref="WorktreeTabs.Switch"/>
+            <separator/>
+            <reference ref="WorktreeTabs.MultipleRows"/>
+        </group>
     </actions>
 </idea-plugin>

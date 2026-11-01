@@ -77,6 +77,11 @@ tasks.test {
     useJUnitPlatform()
 }
 
+// Verifying checks the signed zip, so signing comes first (the IntelliJ Platform plugin doesn't declare it).
+tasks.verifyPluginSignature {
+    dependsOn(tasks.signPlugin)
+}
+
 tasks.runIde {
     // ./gradlew runIde -PrunIdeProject=/path/to/repo opens that project in the sandbox IDE.
     providers.gradleProperty("runIdeProject").orNull?.let { args(it) }

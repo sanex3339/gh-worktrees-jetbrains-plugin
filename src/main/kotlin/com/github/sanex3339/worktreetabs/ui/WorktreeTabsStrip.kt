@@ -17,26 +17,23 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.IdeRootPaneNorthExtension
-import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.panels.HorizontalLayout
 import com.intellij.util.ui.JBUI
-import com.intellij.util.ui.WrapLayout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.awt.BorderLayout
-import java.awt.Cursor
 import java.awt.Dimension
-import java.awt.FlowLayout
-import java.awt.Graphics
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.MouseWheelEvent
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.ScrollPaneConstants
+import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 
 class WorktreeTabsNorthExtension : IdeRootPaneNorthExtension {
@@ -50,12 +47,12 @@ class WorktreeTabsNorthExtension : IdeRootPaneNorthExtension {
 class WorktreeTabsUiScope(val scope: CoroutineScope)
 
 /**
- * The full-width row of worktree tabs under the main toolbar, hidden in projects without a Git repository. Tabs that
- * don't fit either scroll in one row (wheel or trackpad; the active tab is kept in view) or wrap into more rows; the
- * chevron at the end lists every worktree.
+ * The tab bar under the main toolbar, styled like macOS window tabs; hidden in projects without a Git repository.
+ * Tabs that don't fit either scroll in one row (wheel or trackpad; the active tab is kept in view) or wrap into more
+ * rows. "+" creates a worktree; the chevron lists every worktree.
  */
 class WorktreeTabsStrip(private val project: Project) : JPanel(BorderLayout()) {
-    private val tabs = JPanel(FlowLayout(FlowLayout.LEADING, 0, 0)).apply { isOpaque = false }
+    private val tabs = TabsPanel()
     private val scroll = JBScrollPane(tabs, ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED).apply {
         border = JBUI.Borders.empty()
         viewportBorder = null
@@ -64,40 +61,31 @@ class WorktreeTabsStrip(private val project: Project) : JPanel(BorderLayout()) {
         // No visible scrollbar: the wheel, the trackpad and the chevron reach the tabs that don't fit.
         horizontalScrollBar.preferredSize = Dimension(0, 0)
     }
-    private val chevron = JBLabel(AllIcons.General.ChevronDown).apply {
-        border = JBUI.Borders.empty(0, 8)
-        toolTipText = "All worktrees"
-        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+    private val newWorktree = StripButton(AllIcons.General.Add, "New worktree…") { event ->
+        ActionManager.getInstance().getAction(NEW_WORKTREE_ACTION)?.let { ActionUtil.invokeAction(it, this, STRIP_POPUP_PLACE, event, null) }
     }
-    private val newButton = JBLabel(AllIcons.General.Add).apply {
-        border = JBUI.Borders.empty(0, 6)
-        toolTipText = "New worktree…"
-        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-    }
+    private val allWorktrees = StripButton(AllIcons.General.ChevronDown, "All worktrees") { _ -> WorktreePopup.create(project).showUnderneathOf(this) }
     private var multipleRows: Boolean? = null
     private var updates: Job? = null
 
+    /** One tab per worktree path, updated in place across renders. */
+    private val tabsByPath = LinkedHashMap<String, WorktreeTab>()
+
     init {
         isVisible = false
-        border = JBUI.Borders.customLineBottom(JBUI.CurrentTheme.EditorTabs.borderColor())
-        // BorderLayout stretches both buttons to the strip's height, so their icons sit centered like the tab labels.
+        // Transparent: the tabs sit on the window's own background, like macOS window tabs.
+        isOpaque = false
+        // At the top of the strip, level with the first row of tabs (they stay there when tabs wrap into more rows).
+        val buttons = JPanel(HorizontalLayout(JBUI.scale(2), SwingConstants.CENTER)).apply {
+            isOpaque = false
+            border = JBUI.Borders.empty(TabsPanel.VERTICAL_PADDING, 2, 0, 6)
+            add(newWorktree)
+            add(allWorktrees)
+        }
         add(JPanel(BorderLayout()).apply {
             isOpaque = false
-            add(newButton, BorderLayout.WEST)
-            add(chevron, BorderLayout.EAST)
+            add(buttons, BorderLayout.NORTH)
         }, BorderLayout.EAST)
-        chevron.addMouseListener(object : MouseAdapter() {
-            override fun mouseReleased(e: MouseEvent) {
-                if (e.button == MouseEvent.BUTTON1) WorktreePopup.create(project).showUnderneathOf(chevron)
-            }
-        })
-        newButton.addMouseListener(object : MouseAdapter() {
-            override fun mouseReleased(e: MouseEvent) {
-                if (e.button != MouseEvent.BUTTON1) return
-                val action = ActionManager.getInstance().getAction(NEW_WORKTREE_ACTION) ?: return
-                ActionUtil.invokeAction(action, newButton, STRIP_POPUP_PLACE, e, null)
-            }
-        })
         tabs.addMouseWheelListener(::scrollSideways)
         val contextMenu = contextMenuListener(STRIP_POPUP_GROUP)
         addMouseListener(contextMenu)
@@ -123,51 +111,46 @@ class WorktreeTabsStrip(private val project: Project) : JPanel(BorderLayout()) {
         super.removeNotify()
     }
 
-    override fun paintComponent(g: Graphics) {
-        g.color = JBUI.CurrentTheme.EditorTabs.background()
-        g.fillRect(0, 0, width, height)
-    }
-
     private fun render(state: WorktreesState, switching: String?, statuses: Map<String, WorktreeStatus>, wrap: Boolean) {
         isVisible = state.worktrees.isNotEmpty()
-        chevron.isVisible = state.worktrees.size > 1
-        val indexHistory = WorktreeIndexHistory.getInstance()
+        allWorktrees.isVisible = state.worktrees.size > 1
         if (wrap != multipleRows) layOut(wrap)
 
-        tabs.removeAll()
+        val indexHistory = WorktreeIndexHistory.getInstance()
         val unsupported = (state.support as? SwitchSupport.Unsupported)?.reason
-        var activeTab: WorktreeTab? = null
-        for (worktree in state.worktrees) {
+        val ordered = state.worktrees.map { worktree ->
             val active = worktree.path == state.activePath
-            val tab = WorktreeTab(
-                worktree = worktree,
-                state = TabState(
-                    active = active,
-                    switching = worktree.path == switching,
-                    indexed = active || indexHistory.isIndexed(worktree.path),
-                    status = statuses[worktree.path],
-                    disabledReason = unsupported,
-                ),
-                onSelect = { WorktreeSwitcher.getInstance(project).switchTo(worktree.path) },
-                contextMenu = contextMenuListener(TAB_POPUP_GROUP),
+            val tabState = TabState(
+                active = active,
+                switching = worktree.path == switching,
+                indexed = active || indexHistory.isIndexed(worktree.path),
+                status = statuses[worktree.path],
+                disabledReason = unsupported,
             )
-            if (worktree.path == (switching ?: state.activePath)) activeTab = tab
-            tabs.add(tab)
+            tabsByPath[worktree.path]?.also { it.update(worktree, tabState) }
+                ?: WorktreeTab(worktree, tabState, onSelect = { WorktreeSwitcher.getInstance(project).switchTo(it.path) }, contextMenu = contextMenuListener(TAB_POPUP_GROUP))
         }
+        tabsByPath.clear()
+        ordered.forEach { tabsByPath[it.worktree.path] = it }
+        // Touch the component tree only when tabs come, go or move; a status change repaints the tabs it concerns.
+        if (tabs.components.toList() != ordered) {
+            tabs.removeAll()
+            ordered.forEach(tabs::add)
+        }
+        val focusTab = tabsByPath[switching ?: state.activePath]
         revalidate()
         repaint()
-        activeTab?.let { tab -> SwingUtilities.invokeLater { if (!wrap) tabs.scrollRectToVisible(tab.bounds) } }
+        focusTab?.let { tab -> SwingUtilities.invokeLater { if (!wrap) tabs.scrollRectToVisible(tab.bounds) } }
     }
 
     private fun layOut(wrap: Boolean) {
         multipleRows = wrap
         remove(scroll)
         remove(tabs)
+        tabs.wrap = wrap
         if (wrap) {
-            tabs.layout = WrapLayout(FlowLayout.LEADING, 0, 0)
             add(tabs, BorderLayout.CENTER)
         } else {
-            tabs.layout = FlowLayout(FlowLayout.LEADING, 0, 0)
             scroll.setViewportView(tabs)
             add(scroll, BorderLayout.CENTER)
         }

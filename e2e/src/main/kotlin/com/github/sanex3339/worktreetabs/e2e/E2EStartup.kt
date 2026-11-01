@@ -24,6 +24,18 @@ class E2EStartup : ProjectActivity {
 @Service(Service.Level.PROJECT)
 class E2EService(private val project: Project, private val scope: CoroutineScope) {
     fun run(worktree: String, report: Path, exit: Boolean) {
+        // This window is driven by the harness; clicking in it spoils the run. Say so where the user can't miss it.
+        val notice = com.intellij.notification.Notification(
+            "Worktree Tabs",
+            "Automated end-to-end test running",
+            "This WebStorm window is driven by the Worktree Tabs test harness and closes by itself. Please don't click in it.",
+            com.intellij.notification.NotificationType.WARNING,
+        ).setImportant(true)
+        notice.notify(project)
+        // Out of the way in the Dock: the scenario needs the window, not the user's clicks.
+        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+            com.intellij.openapi.wm.WindowManager.getInstance().getFrame(project)?.extendedState = java.awt.Frame.ICONIFIED
+        }
         scope.launch {
             try {
                 Scenario(project, project.basePath!!, worktree).run(report)

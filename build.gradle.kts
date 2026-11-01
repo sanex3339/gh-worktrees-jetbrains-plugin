@@ -59,6 +59,12 @@ intellijPlatform {
             untilBuild = provider { null }
         }
     }
+    // Secrets come from the environment (as in gh-stack: ~/.jetbrains-signing locally, GitHub secrets in CI); never commit them.
+    signing {
+        certificateChain = providers.environmentVariable("CERTIFICATE_CHAIN")
+        privateKey = providers.environmentVariable("PRIVATE_KEY")
+        password = providers.environmentVariable("PRIVATE_KEY_PASSWORD")
+    }
     pluginVerification {
         ides {
             val ideLocalPath = providers.gradleProperty("ideLocalPath").orNull

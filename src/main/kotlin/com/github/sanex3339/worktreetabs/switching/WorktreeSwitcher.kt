@@ -1,6 +1,7 @@
 package com.github.sanex3339.worktreetabs.switching
 
 import com.github.sanex3339.worktreetabs.model.Worktree
+import com.github.sanex3339.worktreetabs.model.WorktreePaths
 import com.github.sanex3339.worktreetabs.registry.SwitchSupport
 import com.github.sanex3339.worktreetabs.registry.WorktreeIndexHistory
 import com.github.sanex3339.worktreetabs.registry.WorktreeRegistry
@@ -168,6 +169,26 @@ class WorktreeSwitcher(private val project: Project, scope: CoroutineScope) {
         if (state.support !is SwitchSupport.Supported || switchingTo.value != null || project.isDisposed || WorktreeRegistry.getInstance(project).isClosing) return
         val module = readAction { ModuleManager.getInstance(project).modules.singleOrNull() } ?: return
         CoreSwap.excludeNestedWorktrees(module, active, state.worktrees.map { it.path })
+        keepGitOnActiveWorktree(active, state.worktrees.map { it.path })
+    }
+
+    /**
+     * Git stays mapped to the active worktree alone. The IDE registers the project's base folder (the main checkout) as
+     * a root again whenever it finds it unmapped, so while another worktree is active that folder is on its list of
+     * roots to leave unregistered; it comes off the list when the main checkout is active again.
+     */
+    private suspend fun keepGitOnActiveWorktree(active: String, worktreePaths: List<String>) {
+        val basePath = project.basePath ?: return
+        val configuration = com.intellij.openapi.vcs.VcsConfiguration.getInstance(project)
+        if (WorktreePaths.normalized(active) == WorktreePaths.normalized(basePath)) {
+            if (configuration.isIgnoredUnregisteredRoot(basePath)) configuration.removeFromIgnoredUnregisteredRoots(listOf(basePath))
+        } else if (!configuration.isIgnoredUnregisteredRoot(basePath)) {
+            configuration.addIgnoredUnregisteredRoots(listOf(basePath))
+        }
+        if (CoreSwap.isGitMappedTo(project, active)) return
+        val target = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByPath(active) ?: return
+        LOG.info("Git was mapped to more than the active worktree; mapping it to $active only")
+        CoreSwap.remapVcs(project, worktreePaths, target)
     }
 
     companion object {

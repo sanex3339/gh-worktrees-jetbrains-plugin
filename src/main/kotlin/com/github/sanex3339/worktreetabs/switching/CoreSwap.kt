@@ -50,13 +50,13 @@ internal object CoreSwap {
         }
 
         val source = LocalFileSystem.getInstance().findFileByPath(from)
-        remapVcs(project, from, target)
+        remapVcs(project, worktreePaths, target)
         waitForRepository(project, target)
         try {
             moveContentRoot(module, from, to, worktreePaths)
         } catch (e: Throwable) {
             LOG.warn("Moving the content root to $to failed; mapping Git back to $from", e)
-            if (source != null) runCatching { remapVcs(project, to, source) }.onFailure { LOG.warn("Mapping Git back failed", it) }
+            if (source != null) runCatching { remapVcs(project, worktreePaths, source) }.onFailure { LOG.warn("Mapping Git back failed", it) }
             throw e
         }
 
@@ -106,11 +106,22 @@ internal object CoreSwap {
         entry.addSourceFolder(VfsUtilCore.pathToUrl(path), type, folder.jpsElement.getProperties(type) as P)
     }
 
-    /** Replaces the Git mapping of [from] (or the `<Project>` mapping, which does not follow a content-root move) with [target]. */
-    private suspend fun remapVcs(project: Project, from: String, target: VirtualFile) = withContext(Dispatchers.EDT) {
+    /**
+     * Maps Git to [target] only: drops the `<Project>` mapping (it doesn't follow a content-root move, and the IDE
+     * re-adds it for the main checkout) and every mapping of another worktree of the repository; keeps the rest.
+     */
+    suspend fun remapVcs(project: Project, worktreePaths: List<String>, target: VirtualFile) = withContext(Dispatchers.EDT) {
         val manager = ProjectLevelVcsManager.getInstance(project)
-        val kept = manager.directoryMappings.filterNot { it.vcs == GitVcs.NAME && (it.directory.isEmpty() || FileUtil.toSystemIndependentName(it.directory) == from) }
+        val worktrees = worktreePaths.map(WorktreePaths::normalized).toSet()
+        val kept = manager.directoryMappings.filterNot { it.vcs == GitVcs.NAME && (it.isDefaultMapping || WorktreePaths.normalized(it.directory) in worktrees) }
         manager.setDirectoryMappings(kept + VcsDirectoryMapping(target.path, GitVcs.NAME))
+    }
+
+    /** Whether Git is mapped to [active] alone (the `<Project>` mapping counts as the project's base path). */
+    fun isGitMappedTo(project: Project, active: String): Boolean {
+        val mappings = ProjectLevelVcsManager.getInstance(project).directoryMappings.filter { it.vcs == GitVcs.NAME }
+        val mapped = mappings.singleOrNull()?.let { if (it.isDefaultMapping) project.basePath else it.directory } ?: return false
+        return WorktreePaths.normalized(mapped) == WorktreePaths.normalized(active)
     }
 
     private suspend fun waitForRepository(project: Project, target: VirtualFile) {

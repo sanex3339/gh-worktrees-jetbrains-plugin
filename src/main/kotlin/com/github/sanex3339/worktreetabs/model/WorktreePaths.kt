@@ -2,6 +2,9 @@ package com.github.sanex3339.worktreetabs.model
 
 /** Path arithmetic for switching; every path is system-independent (forward slashes, no trailing slash). */
 object WorktreePaths {
+    /** [path] with `.` and `..` resolved and forward slashes, for comparing paths the IDE spells differently. */
+    fun normalized(path: String): String = java.nio.file.Path.of(path).normalize().toString().replace('\\', '/')
+
     fun isStrictlyUnder(path: String, root: String): Boolean = path.startsWith("$root/")
 
     /** [path] moved from under [from] to the same place under [to]; paths outside [from] are returned unchanged. */

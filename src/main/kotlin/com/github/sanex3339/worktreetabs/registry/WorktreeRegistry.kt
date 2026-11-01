@@ -3,6 +3,7 @@ package com.github.sanex3339.worktreetabs.registry
 import com.github.sanex3339.worktreetabs.git.WorktreeGit
 import com.github.sanex3339.worktreetabs.model.Worktree
 import com.github.sanex3339.worktreetabs.model.WorktreeOrder
+import com.github.sanex3339.worktreetabs.model.WorktreePaths
 import com.intellij.dvcs.repo.VcsRepositoryManager
 import com.intellij.dvcs.repo.VcsRepositoryMappingListener
 import com.intellij.openapi.application.ApplicationActivationListener
@@ -109,15 +110,20 @@ class WorktreeRegistry(private val project: Project, scope: CoroutineScope) {
     private suspend fun load(): WorktreesState {
         if (isClosing) return state.value
         val repositories = GitRepositoryManager.getInstance(project).repositories
-        val repository = repositories.firstOrNull() ?: return WorktreesState(support = SwitchSupport.Unsupported("The project has no Git repository"))
+        if (repositories.isEmpty()) return WorktreesState(support = SwitchSupport.Unsupported("The project has no Git repository"))
+        val roots = readAction { projectRoots() }
+        val repository = repositories.firstOrNull { root -> roots.contentRoot?.let { sameFolder(root.root.path, it) } == true } ?: repositories.first()
         val listed = WorktreeGit.list(project, repository.root) ?: return state.value
         val basePath = project.basePath
         val worktrees = WorktreeOrder.forTabs(listed).map { it.copy(path = spelledLikeBasePath(it.path, basePath)) }
 
-        val roots = readAction { projectRoots() }
         val activePath = roots.contentRoot?.let { root -> worktrees.firstOrNull { sameFolder(it.path, root) }?.path ?: root }
+        // Other worktrees of the same repository can be mapped for a moment (the IDE re-adds the main checkout); the
+        // switcher puts the mapping right. Only repositories from elsewhere make switching unavailable.
+        val worktreeFolders = listed.map { WorktreePaths.normalized(it.path) }.toSet()
+        val foreign = repositories.filter { WorktreePaths.normalized(it.root.path) !in worktreeFolders && worktrees.none { worktree -> sameFolder(worktree.path, it.root.path) } }
         val support = when {
-            repositories.size > 1 -> SwitchSupport.Unsupported("The project has ${repositories.size} Git repositories")
+            foreign.isNotEmpty() -> SwitchSupport.Unsupported("The project has other Git repositories (${foreign.joinToString { it.root.name }})")
             roots.moduleCount != 1 -> SwitchSupport.Unsupported("The project has ${roots.moduleCount} modules")
             roots.contentRootCount != 1 -> SwitchSupport.Unsupported("The project's module has ${roots.contentRootCount} content roots")
             roots.externalSystem != null -> SwitchSupport.Unsupported("The project is managed by ${roots.externalSystem}")

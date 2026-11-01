@@ -47,7 +47,8 @@ class WorktreeTabsNorthExtension : IdeRootPaneNorthExtension {
 class WorktreeTabsUiScope(val scope: CoroutineScope)
 
 /**
- * The tab bar under the main toolbar, styled like macOS window tabs; hidden in projects without a Git repository.
+ * The tab bar under the main toolbar, styled like macOS window tabs; hidden unless the repository has a worktree
+ * besides the main checkout.
  * Tabs that don't fit either scroll in one row (wheel or trackpad; the active tab is kept in view) or wrap into more
  * rows. "+" creates a worktree; the chevron lists every worktree.
  */
@@ -61,7 +62,7 @@ class WorktreeTabsStrip(private val project: Project) : JPanel(BorderLayout()) {
         // No visible scrollbar: the wheel, the trackpad and the chevron reach the tabs that don't fit.
         horizontalScrollBar.preferredSize = Dimension(0, 0)
     }
-    private val newWorktree = StripButton(AllIcons.General.Add, "New worktree…") { event ->
+    private val newWorktree = StripButton(AllIcons.General.Add, "Create worktree…") { event ->
         ActionManager.getInstance().getAction(NEW_WORKTREE_ACTION)?.let { ActionUtil.invokeAction(it, this, STRIP_POPUP_PLACE, event, null) }
     }
     private val allWorktrees = StripButton(AllIcons.General.ChevronDown, "All worktrees") { _ -> WorktreePopup.create(project).showUnderneathOf(this) }
@@ -112,8 +113,8 @@ class WorktreeTabsStrip(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun render(state: WorktreesState, switching: String?, statuses: Map<String, WorktreeStatus>, wrap: Boolean) {
-        isVisible = state.worktrees.isNotEmpty()
-        allWorktrees.isVisible = state.worktrees.size > 1
+        // Only the main checkout means nothing to switch to; Git | Create Worktree… makes the first one.
+        isVisible = state.worktrees.size > 1
         if (wrap != multipleRows) layOut(wrap)
 
         val indexHistory = WorktreeIndexHistory.getInstance()

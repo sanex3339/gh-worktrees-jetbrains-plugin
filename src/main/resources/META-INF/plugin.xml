@@ -43,7 +43,9 @@
                 text="Show Worktree Tabs in Multiple Rows"
                 description="Wrap the worktree tabs into several rows instead of one scrollable row"/>
         <action id="WorktreeTabs.New" class="com.github.sanex3339.worktreetabs.actions.NewWorktreeAction"
-                text="New Worktree…" description="Create a git worktree and switch to it" icon="AllIcons.General.Add"/>
+                text="Create Worktree…" description="Create a git worktree and switch this window to it" icon="AllIcons.General.Add">
+            <add-to-group group-id="Git.MainMenu" anchor="last"/>
+        </action>
         <action id="WorktreeTabs.SwitchTo" class="com.github.sanex3339.worktreetabs.actions.SwitchToWorktreeAction"
                 text="Switch to This Worktree"/>
         <action id="WorktreeTabs.Lock" class="com.github.sanex3339.worktreetabs.actions.LockWorktreeAction"

@@ -11,7 +11,7 @@ Editors, run configurations, the terminal and other state are not handled here.
                  -PspikeReport=/path/to/report.md -PspikeAutorun=true -PspikeExit=true
 ```
 
-A sandbox WebStorm (the one at `/Users/sanex/Applications/WebStorm.app`, override with `-PideLocalPath`) opens the
+A sandbox WebStorm (`~/Applications/WebStorm.app` by default, override with `-PideLocalPath`) opens the
 main checkout, runs phases P0–P4 and exits. Without `-PspikeAutorun`, run *Worktree Spike: Run Experiment* or
 *Worktree Spike: Swap to Worktree…* from Find Action.
 

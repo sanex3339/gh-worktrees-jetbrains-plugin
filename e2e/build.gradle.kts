@@ -30,7 +30,7 @@ val pluginUnderTest = rootDir.resolve("../build/distributions").listFiles { file
 
 dependencies {
     intellijPlatform {
-        local(providers.gradleProperty("ideLocalPath").getOrElse("/Users/sanex/Applications/WebStorm.app"))
+        local(providers.gradleProperty("ideLocalPath").orElse(providers.systemProperty("user.home").map { "$it/Applications/WebStorm.app" }).get())
         localPlugin(pluginUnderTest)
         bundledPlugin("Git4Idea")
         bundledPlugin("JavaScript")

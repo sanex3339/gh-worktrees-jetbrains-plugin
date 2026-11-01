@@ -26,7 +26,7 @@ repositories {
 
 dependencies {
     intellijPlatform {
-        local(providers.gradleProperty("ideLocalPath").getOrElse("/Users/sanex/Applications/WebStorm.app"))
+        local(providers.gradleProperty("ideLocalPath").orElse(providers.systemProperty("user.home").map { "$it/Applications/WebStorm.app" }).get())
         bundledPlugin("Git4Idea")
         bundledPlugin("JavaScript")
         // Split platform modules Git4Idea's API exposes (GitRepository's supertypes).

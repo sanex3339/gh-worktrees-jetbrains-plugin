@@ -1,6 +1,7 @@
 package com.github.sanex3339.worktreetabs.ui
 
 import com.github.sanex3339.worktreetabs.actions.WorktreeDataKeys
+import com.github.sanex3339.worktreetabs.model.RelativeTime
 import com.github.sanex3339.worktreetabs.model.Worktree
 import com.github.sanex3339.worktreetabs.model.WorktreeStatus
 import com.intellij.icons.AllIcons
@@ -27,6 +28,7 @@ import java.awt.geom.RoundRectangle2D
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
 import javax.swing.Timer
+import javax.swing.ToolTipManager
 
 /** What a tab shows besides its worktree. */
 internal data class TabState(
@@ -70,6 +72,8 @@ internal class WorktreeTab(
         add(lock)
         add(name)
         add(commits)
+        // Built on each hover (getToolTipText), so "last edited 5 minutes ago" is never out of date.
+        ToolTipManager.sharedInstance().registerComponent(this)
         addMouseListener(contextMenu)
         addMouseListener(object : MouseAdapter() {
             override fun mouseEntered(e: MouseEvent) {
@@ -110,7 +114,6 @@ internal class WorktreeTab(
         commits.isVisible = badge != null
         commits.text = badge.orEmpty()
         commits.foreground = TabColors.secondaryForeground
-        toolTipText = tooltip()
         cursor = if (selectable) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else Cursor.getDefaultCursor()
         if (state.switching && isDisplayable) animation.start() else animation.stop()
         revalidate()
@@ -126,6 +129,8 @@ internal class WorktreeTab(
         animation.stop()
         super.removeNotify()
     }
+
+    override fun getToolTipText(event: MouseEvent?): String = tooltip()
 
     override fun uiDataSnapshot(sink: DataSink) {
         sink[WorktreeDataKeys.WORKTREE] = worktree
@@ -185,7 +190,11 @@ internal class WorktreeTab(
         if (worktree.isMain) html.br().append("Main checkout")
         if (worktree.isLocked) html.br().append("Locked" + (worktree.lockReason?.let { ": $it" } ?: ""))
         state.status?.let { status ->
-            if (status.changes > 0) html.br().append("${status.changes} uncommitted ${if (status.changes == 1) "file" else "files"}")
+            if (status.changes > 0) {
+                val files = "${status.changes} uncommitted ${if (status.changes == 1) "file" else "files"}"
+                val edited = status.lastEdited?.let { ", last edited ${RelativeTime.ago(it, System.currentTimeMillis())}" }.orEmpty()
+                html.br().append(files + edited)
+            }
             val ahead = status.ahead ?: 0
             val behind = status.behind ?: 0
             if (status.upstream != null && (ahead > 0 || behind > 0)) html.br().append("$ahead ahead, $behind behind ${status.upstream}")

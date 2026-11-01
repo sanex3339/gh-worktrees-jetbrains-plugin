@@ -12,6 +12,8 @@ data class Worktree(
     val lockReason: String? = null,
     /** The worktree's folder is gone; `git worktree prune` would remove the entry. */
     val isPrunable: Boolean = false,
+    /** When the worktree was created (epoch millis), when known; tabs follow creation order. */
+    val createdAt: Long? = null,
 ) {
     val folderName: String get() = path.trimEnd('/').substringAfterLast('/')
 
@@ -20,10 +22,19 @@ data class Worktree(
 }
 
 object WorktreeOrder {
-    /** The main checkout first, then the other worktrees by label; bare and prunable entries are not tabs. */
+    /**
+     * The main checkout first, then the other worktrees in the order they were created (like browser tabs, a new one
+     * goes last and nothing moves on its own); worktrees without a known creation time after them, by label. Bare and
+     * prunable entries are not tabs.
+     */
     fun forTabs(worktrees: List<Worktree>): List<Worktree> =
         worktrees.filterNot { it.isBare || it.isPrunable }
-            .sortedWith(compareByDescending<Worktree> { it.isMain }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.label })
+            .sortedWith(
+                compareByDescending<Worktree> { it.isMain }
+                    .thenBy { it.createdAt == null }
+                    .thenBy { it.createdAt }
+                    .thenBy(String.CASE_INSENSITIVE_ORDER) { it.label },
+            )
 }
 
 object WorktreeListParser {

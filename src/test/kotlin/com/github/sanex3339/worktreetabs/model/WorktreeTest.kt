@@ -25,4 +25,14 @@ class WorktreeTest {
         assertEquals(listOf(main, alpha, zeta), WorktreeOrder.forTabs(listOf(zeta, gone, main, alpha)))
         assertEquals(listOf(alpha, zeta), WorktreeOrder.forTabs(listOf(bare, zeta, alpha)))
     }
+
+    @Test
+    fun `with creation times, tabs follow them, newest last, and worktrees without one come after`() {
+        val main = Worktree("/repo/main", "1", "main", isMain = true)
+        val first = Worktree("/repo/z", "2", "zeta", isMain = false, createdAt = 1_000)
+        val second = Worktree("/repo/a", "3", "alpha", isMain = false, createdAt = 2_000)
+        val unknown = Worktree("/repo/b", "4", "beta", isMain = false)
+
+        assertEquals(listOf(main, first, second, unknown), WorktreeOrder.forTabs(listOf(unknown, second, main, first)))
+    }
 }

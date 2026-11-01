@@ -2,6 +2,7 @@ package com.github.sanex3339.worktreetabs.registry
 
 import com.github.sanex3339.worktreetabs.git.WorktreeGit
 import com.github.sanex3339.worktreetabs.model.Worktree
+import com.github.sanex3339.worktreetabs.model.WorktreeAdminDir
 import com.github.sanex3339.worktreetabs.model.WorktreeOrder
 import com.github.sanex3339.worktreetabs.model.WorktreePaths
 import com.intellij.dvcs.repo.VcsRepositoryManager
@@ -115,7 +116,8 @@ class WorktreeRegistry(private val project: Project, scope: CoroutineScope) {
         val repository = repositories.firstOrNull { root -> roots.contentRoot?.let { sameFolder(root.root.path, it) } == true } ?: repositories.first()
         val listed = WorktreeGit.list(project, repository.root) ?: return state.value
         val basePath = project.basePath
-        val worktrees = WorktreeOrder.forTabs(listed).map { it.copy(path = spelledLikeBasePath(it.path, basePath)) }
+        val created = listed.map { if (it.isMain) it else it.copy(createdAt = WorktreeAdminDir.createdAt(it.path)) }
+        val worktrees = WorktreeOrder.forTabs(created).map { it.copy(path = spelledLikeBasePath(it.path, basePath)) }
 
         val activePath = roots.contentRoot?.let { root -> worktrees.firstOrNull { sameFolder(it.path, root) }?.path ?: root }
         // Other worktrees of the same repository can be mapped for a moment (the IDE re-adds the main checkout); the

@@ -87,10 +87,18 @@ class WorktreeStatusService(private val project: Project, scope: CoroutineScope)
         val worktrees = registry.state.value.worktrees.filter { !commands.isBeingRemoved(it.path) && java.nio.file.Files.isDirectory(java.nio.file.Path.of(it.path)) }
         val loaded = kotlinx.coroutines.coroutineScope {
             worktrees.map { worktree ->
-                async { parallelGit.withPermit { worktree.path to WorktreeGit.status(project, worktree.path) } }
+                async { parallelGit.withPermit { worktree.path to WorktreeGit.status(project, worktree.path)?.withLastEdit(worktree.path) } }
             }.awaitAll()
         }
         mutableStatuses.value = loaded.mapNotNull { (path, status) -> status?.let { path to it } }.toMap()
+    }
+
+    /** When the newest of the uncommitted files was modified (deleted files have no time and are skipped). */
+    private fun WorktreeStatus.withLastEdit(worktree: String): WorktreeStatus {
+        val newest = changedPaths.mapNotNull { path ->
+            runCatching { java.nio.file.Files.getLastModifiedTime(java.nio.file.Path.of(worktree, path)).toMillis() }.getOrNull()
+        }.maxOrNull()
+        return copy(lastEdited = newest)
     }
 
     companion object {
